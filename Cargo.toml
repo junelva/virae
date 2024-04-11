@@ -1,10 +1,12 @@
 [package]
-name = "ivae"
+name = "virae"
 version = "0.1.0"
 authors = ["June Elva"]
 edition = "2021"
 
 [dependencies]
+bytemuck = "1.15.0"
+glam = { version = "0.27.0", features = ["bytemuck"] }
 glyphon = "0.5.0"
 pollster = "0.3.0"
 wgpu = "0.19"

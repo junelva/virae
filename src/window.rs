@@ -1,17 +1,18 @@
 use wgpu::{
-    CommandEncoderDescriptor, CompositeAlphaMode, Device, DeviceDescriptor, Features, Instance,
-    InstanceDescriptor, Limits, LoadOp, Operations, PresentMode, Queue, RenderPassColorAttachment,
-    RenderPassDescriptor, RequestAdapterOptions, Surface, SurfaceConfiguration, TextureFormat,
-    TextureUsages, TextureViewDescriptor,
+    CommandEncoderDescriptor, CompositeAlphaMode, Device, DeviceDescriptor, Features, IndexFormat,
+    Instance, InstanceDescriptor, Limits, LoadOp, Operations, PresentMode, Queue,
+    RenderPassColorAttachment, RenderPassDescriptor, RequestAdapterOptions, Surface,
+    SurfaceConfiguration, TextureFormat, TextureUsages, TextureViewDescriptor,
 };
 use winit::{
     dpi::{LogicalSize, PhysicalSize},
-    event_loop::EventLoop,
+    event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
 };
 
 use std::sync::{Arc, Mutex};
 
+use crate::geo::GeoManager;
 use crate::text::TextCollection;
 
 pub struct Context<'a> {
@@ -22,6 +23,7 @@ pub struct Context<'a> {
     pub swapchain_format: TextureFormat,
     pub scale_factor: f64,
     pub texts: TextCollection,
+    pub geos: GeoManager,
 }
 
 impl Context<'_> {
@@ -32,6 +34,7 @@ impl Context<'_> {
     ) -> (EventLoop<()>, Arc<winit::window::Window>, Self) {
         // event loop, window
         let event_loop = EventLoop::new().unwrap();
+        event_loop.set_control_flow(ControlFlow::Poll);
         let window = Arc::new(
             WindowBuilder::new()
                 .with_inner_size(LogicalSize::new(width as f64, height as f64))
@@ -86,13 +89,14 @@ impl Context<'_> {
             event_loop,
             window,
             Self {
-                device: device_arc,
+                device: device_arc.clone(),
                 queue: queue_arc,
                 surface: Arc::<Mutex<Surface>>::new(Mutex::new(surface)),
                 config: Arc::<Mutex<SurfaceConfiguration>>::new(Mutex::new(config)),
                 swapchain_format,
                 scale_factor,
                 texts,
+                geos: GeoManager::new(device_arc.clone(), swapchain_format),
             },
         )
     }
@@ -144,6 +148,17 @@ impl Context<'_> {
                 occlusion_query_set: None,
             });
 
+            // include geos in pass
+            pass.set_pipeline(&self.geos.instance_groups[0].render_pipeline);
+            pass.set_bind_group(0, &self.geos.instance_groups[0].bind_group, &[]);
+            pass.set_index_buffer(
+                self.geos.instance_groups[0].index_buffer.slice(..),
+                IndexFormat::Uint16,
+            );
+            pass.set_vertex_buffer(0, self.geos.instance_groups[0].vertex_buffer.slice(..));
+            pass.draw_indexed(0..6_u32, 0, 0..1);
+
+            // include text labels in pass
             self.texts
                 .text_renderer
                 .render(&self.texts.atlas, &mut pass)

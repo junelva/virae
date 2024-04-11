@@ -1,15 +1,26 @@
 use wgpu::hal::Rect;
 use winit::event::{Event, WindowEvent};
 
+mod geo;
 mod text;
 mod window;
 
 use crate::window::Context;
 
+fn main() {
+    pollster::block_on(run());
+}
+
 async fn run() {
     let (width, height) = (800, 600);
-    let (event_loop, window, mut context) = Context::new("ivae", width, height).await;
+    let (event_loop, window, mut context) = Context::new("virae", width, height).await;
 
+    {
+        let config = context.config.lock().unwrap();
+        context
+            .geos
+            .new_unit_square(context.device.clone(), config.format);
+    }
     for i in 0..10 {
         context.texts.new_text(
             Rect {
@@ -20,13 +31,14 @@ async fn run() {
             },
             "This is a test string.",
             context.scale_factor,
-            context.scale_factor * 2.0,
+            1.0,
         );
     }
 
+    // if event_loop's ControlFlow is not Poll, it's
     // necessary to request initial frame on Wayland
-    // otherwise no redraw requested, & no window shows
-    window.request_redraw();
+    // otherwise no redraw requested; no window shows.
+    // window.request_redraw();
 
     event_loop
         .run(move |event, target| {
@@ -49,8 +61,4 @@ async fn run() {
             }
         })
         .unwrap();
-}
-
-fn main() {
-    pollster::block_on(run());
 }
