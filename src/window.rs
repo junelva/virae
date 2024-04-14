@@ -10,10 +10,43 @@ use winit::{
     window::WindowBuilder,
 };
 
-use std::sync::{Arc, Mutex};
+use std::{
+    fs::metadata,
+    sync::{Arc, Mutex},
+    time::SystemTime,
+};
 
 use crate::geo::GeoManager;
 use crate::text::TextCollection;
+
+enum FileWatcherAction {
+    ReloadShader,
+}
+
+struct FileWatcherEntry {
+    path: String,
+    last_modified: SystemTime,
+    action: FileWatcherAction,
+}
+
+pub struct FileWatcher {
+    entries: Vec<FileWatcherEntry>,
+}
+
+impl FileWatcher {
+    fn new() -> Self {
+        FileWatcher { entries: vec![] }
+    }
+
+    pub fn add_path(&mut self, path: &str) {
+        let metadata = metadata(path).unwrap();
+        self.entries.push(FileWatcherEntry {
+            path: path.to_string(),
+            last_modified: metadata.modified().unwrap(),
+            action: FileWatcherAction::ReloadShader,
+        })
+    }
+}
 
 pub struct Context<'a> {
     pub device: Arc<Mutex<Device>>,
@@ -24,6 +57,7 @@ pub struct Context<'a> {
     pub scale_factor: f64,
     pub texts: TextCollection,
     pub geos: GeoManager,
+    pub file_watcher: FileWatcher,
 }
 
 impl Context<'_> {
@@ -97,17 +131,37 @@ impl Context<'_> {
                 scale_factor,
                 texts,
                 geos: GeoManager::new(device_arc.clone(), swapchain_format),
+                file_watcher: FileWatcher::new(),
             },
         )
     }
 
-    pub fn resize(&self, size: PhysicalSize<u32>) {
+    pub fn check_watched_files(&mut self) {
+        for fwe in self.file_watcher.entries.iter_mut() {
+            let metadata = metadata(&*fwe.path).unwrap();
+            if metadata.modified().unwrap() > fwe.last_modified {
+                match fwe.action {
+                    FileWatcherAction::ReloadShader => {
+                        self.geos.reload_shader(self.device.clone(), &fwe.path)
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn update(&mut self) {
+        self.check_watched_files();
+    }
+
+    pub fn resize(&mut self, size: PhysicalSize<u32>) {
         let device = self.device.lock().unwrap();
         let mut config = self.config.lock().unwrap();
         config.width = size.width;
         config.height = size.height;
         let surface = self.surface.lock().unwrap();
         surface.configure(&device, &config);
+        self.geos
+            .update_view(self.queue.clone(), config.width, config.height);
     }
 
     pub fn render(&mut self) {
@@ -149,14 +203,25 @@ impl Context<'_> {
             });
 
             // include geos in pass
-            pass.set_pipeline(&self.geos.instance_groups[0].render_pipeline);
+            pass.set_pipeline(
+                &self.geos.instance_groups[0]
+                    .render_pipeline_record
+                    .render_pipeline,
+            );
             pass.set_bind_group(0, &self.geos.instance_groups[0].bind_group, &[]);
             pass.set_index_buffer(
                 self.geos.instance_groups[0].index_buffer.slice(..),
                 IndexFormat::Uint16,
             );
             pass.set_vertex_buffer(0, self.geos.instance_groups[0].vertex_buffer.slice(..));
-            pass.draw_indexed(0..6_u32, 0, 0..1);
+            pass.set_vertex_buffer(
+                1,
+                self.geos.instance_groups[0]
+                    .instance_buffer_manager
+                    .buffer
+                    .slice(..),
+            );
+            pass.draw_indexed(0..6_u32, 0, 0..self.geos.num_instances(0));
 
             // include text labels in pass
             self.texts

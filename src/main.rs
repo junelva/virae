@@ -1,3 +1,4 @@
+use glam::{Mat4, Vec3, Vec4};
 use wgpu::hal::Rect;
 use winit::event::{Event, WindowEvent};
 
@@ -16,11 +17,27 @@ async fn run() {
     let (event_loop, window, mut context) = Context::new("virae", width, height).await;
 
     {
+        let shader_path = "shaders/shader.wgsl";
         let config = context.config.lock().unwrap();
         context
             .geos
-            .new_unit_square(context.device.clone(), config.format);
+            .new_unit_square(config.format, config.width, config.height, shader_path);
+        context.file_watcher.add_path(shader_path);
+
+        // create test squares
+        context.geos.instance_groups[0].add_new(
+            context.queue.clone(),
+            Mat4::IDENTITY,
+            Vec4::new(0.2, 0.2, 0.2, 1.0),
+        );
+        context.geos.instance_groups[0].add_new(
+            context.queue.clone(),
+            Mat4::IDENTITY + Mat4::from_translation(Vec3::new(0.25, 0.25, 0.0)),
+            Vec4::new(0.2, 0.2, 0.8, 1.0),
+        );
     }
+
+    // test text strings
     for i in 0..10 {
         context.texts.new_text(
             Rect {
@@ -53,6 +70,7 @@ async fn run() {
                         window.request_redraw();
                     }
                     WindowEvent::RedrawRequested => {
+                        context.update();
                         context.render();
                     }
                     WindowEvent::CloseRequested => target.exit(),
