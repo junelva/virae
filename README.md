@@ -15,10 +15,10 @@ often out of order and simply used as scratch.
 
 sunday's evening:
 - [x] actually position rects.
-  - split out loc/rot/scale.
+- [x] split out loc/rot/scale.
 - [x] eat chimken in 30 min.
 - shader prep work, hmm?
-  - [ ] shade the ui rect?
+  - [x] shade the ui rect?
   - [x] uv coords on vertices.
   - [x] pass screen res to fragment shader.
 (... what am i even doing? i keep forgetting...
@@ -28,6 +28,7 @@ sunday's evening:
   these rects... like. absolute pixel size on screen? ideally?
   but there's untread ground... and unknown potential for issues.
 ... okay I did it. [x] )
+- [x] debugging time: rect scale was incorrect
 - [ ] overlapping rect mask text.
   - [x] tie text to rect for testing.
   - [ ] depth buffer mask it.

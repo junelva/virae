@@ -87,7 +87,7 @@ impl ComponentTransform {
             0.0,
         );
         let rotation = Quat::IDENTITY;
-        let scale = Vec3::new(wh.x / screen.x, wh.y / screen.y, 1.0);
+        let scale = Vec3::new((wh.x / screen.x) * 2.0, (wh.y / screen.y) * 2.0, 1.0);
 
         ComponentTransform {
             pixel_rect: Some(pixel_rect),

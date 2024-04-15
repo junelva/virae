@@ -71,12 +71,7 @@ impl TextCollection {
             left: rect.x,
             top: rect.y,
             scale: text_scale_factor,
-            bounds: TextBounds {
-                left: 0,
-                top: 0,
-                right: rect.w as i32,
-                bottom: rect.h as i32,
-            },
+            bounds: TextBounds::default(),
             default_color: Color::rgb(220, 220, 220),
         });
     }

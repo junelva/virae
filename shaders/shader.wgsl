@@ -45,5 +45,13 @@ fn vs_main(
 
 @fragment
 fn fs_main(vout: VertexOutput) -> @location(0) vec4<f32> {
-    return vout.color;
+    // given screen size, calculate pixel coordinate of screen position
+    let uv = vout.tex_coords;
+    // let px_pos = (vout.position.xy * 0.5 + vec2(0.5)) * screen_size;
+    let uv_px = vec2(1.0 / screen_size.x, 1.0 / screen_size.y);
+    let left = step(uv, vec2(0.05));
+    let bott = step(1.0 - uv, vec2(0.05));
+    let border = 1.0 - min(max(left.x + left.y + bott.x + bott.y, 0.0), 1.0);
+    return vec4(vout.color.rgb * border, 1.0);
+    // return vec4(vec2(px / screen_size), 0.0, 1.0);
 }
