@@ -4,7 +4,7 @@ use std::mem::size_of;
 use std::sync::{Arc, Mutex};
 
 use bytemuck::{ByteEq, ByteHash, Pod, Zeroable};
-use glam::{Mat4, Vec4};
+use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use wgpu::{
     BindGroup, BindGroupEntry, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType,
@@ -14,11 +14,30 @@ use wgpu::{
     TextureFormat, VertexAttribute, VertexBufferLayout, VertexFormat, VertexState, VertexStepMode,
 };
 
-const UNIT_SQUARE_VERTICES: [Vec4; 4] = [
-    Vec4::new(-0.5, 0.5, 0.0, 1.0),
-    Vec4::new(0.5, 0.5, 0.0, 1.0),
-    Vec4::new(0.5, -0.5, 0.0, 1.0),
-    Vec4::new(-0.5, -0.5, 0.0, 1.0),
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct Vertex {
+    location: Vec3,
+    tex_coords: Vec2,
+}
+
+const UNIT_SQUARE_VERTICES: [Vertex; 4] = [
+    Vertex {
+        location: Vec3::new(0.0, 0.0, 0.0),
+        tex_coords: Vec2::new(0.0, 0.0),
+    },
+    Vertex {
+        location: Vec3::new(1.0, 0.0, 0.0),
+        tex_coords: Vec2::new(1.0, 0.0),
+    },
+    Vertex {
+        location: Vec3::new(1.0, -1.0, 0.0),
+        tex_coords: Vec2::new(1.0, 1.0),
+    },
+    Vertex {
+        location: Vec3::new(0.0, -1.0, 0.0),
+        tex_coords: Vec2::new(0.0, 1.0),
+    },
 ];
 const UNIT_SQUARE_INDICES: [u16; 6] = [0, 2, 1, 2, 0, 3];
 
@@ -30,9 +49,58 @@ pub struct RenderPipelineRecord {
     pub format: TextureFormat,
 }
 
+pub struct GeoUniformVec2 {
+    vec: Vec2,
+    buffer: Buffer,
+}
 pub struct GeoUniformMatrix {
     matrix: Mat4,
     buffer: Buffer,
+}
+
+#[derive(Copy, Clone)]
+pub struct PixelRect {
+    pub xy: Vec2,
+    pub wh: Vec2,
+    pub screen: Vec2,
+}
+
+pub struct ComponentTransform {
+    pub pixel_rect: Option<PixelRect>,
+    pub location: Vec3,
+    pub rotation: Quat,
+    pub scale: Vec3,
+}
+
+impl ComponentTransform {
+    pub fn pixel_rect_to_screen_transform(pixel_rect: PixelRect) -> ComponentTransform {
+        // given window pixels x, y (top left) of w, h (width, height) produce a transform
+        // that positions the UNIT_SQUARE geometry as desired in render space...
+
+        let xy = pixel_rect.xy;
+        let wh = pixel_rect.wh;
+        let screen = pixel_rect.screen;
+
+        let location = Vec3::new(
+            (xy.x / screen.x) * 2.0 - 1.0,
+            1.0 - (xy.y / screen.y) * 2.0,
+            0.0,
+        );
+        let rotation = Quat::IDENTITY;
+        let scale = Vec3::new(wh.x / screen.x, wh.y / screen.y, 1.0);
+
+        ComponentTransform {
+            pixel_rect: Some(pixel_rect),
+            location,
+            rotation,
+            scale,
+        }
+    }
+}
+
+struct Instance {
+    transform: ComponentTransform,
+    color: Vec4,
 }
 
 #[derive(Copy, Clone, Pod, Zeroable, ByteEq, ByteHash)]
@@ -43,7 +111,7 @@ struct InstanceData {
 }
 
 pub struct InstanceBufferManager {
-    data: Vec<InstanceData>,
+    data: Vec<Instance>,
     pub buffer: Buffer,
 }
 
@@ -61,16 +129,56 @@ impl InstanceBufferManager {
         }
     }
 
-    fn add_instance(&mut self, queue: Arc<Mutex<Queue>>, transform: Mat4, color: Vec4) {
+    fn add_instance(
+        &mut self,
+        queue: Arc<Mutex<Queue>>,
+        transform: ComponentTransform,
+        color: Vec4,
+    ) {
         let queue = queue.lock().unwrap();
-        let new_data = InstanceData { transform, color };
+        let new_data = InstanceData {
+            transform: Mat4::from_scale_rotation_translation(
+                transform.scale,
+                transform.rotation,
+                transform.location,
+            ),
+            color,
+        };
+        // todo realloc this buffer when full
         queue.write_buffer(
             &self.buffer,
             (self.data.len() * size_of::<InstanceData>()) as u64,
             bytemuck::cast_slice(&[new_data]),
         );
-        // todo realloc this buffer when full
-        self.data.push(new_data);
+        self.data.push(Instance { transform, color });
+    }
+
+    fn recalc_screen_instances(&mut self, queue: Arc<Mutex<Queue>>, screen: Vec2) {
+        let queue = queue.lock().unwrap();
+        for (i, instance) in self.data.iter_mut().enumerate() {
+            if instance.transform.pixel_rect.is_some() {
+                let pr = instance.transform.pixel_rect.unwrap();
+                instance.transform =
+                    ComponentTransform::pixel_rect_to_screen_transform(PixelRect {
+                        xy: pr.xy,
+                        wh: pr.wh,
+                        screen,
+                    });
+                let new_data = InstanceData {
+                    transform: Mat4::from_scale_rotation_translation(
+                        instance.transform.scale,
+                        instance.transform.rotation,
+                        instance.transform.location,
+                    ),
+                    color: instance.color,
+                };
+                queue.write_buffer(
+                    &self.buffer,
+                    (i * size_of::<InstanceData>()) as BufferAddress,
+                    bytemuck::cast_slice(&[new_data]),
+                );
+            }
+        }
     }
 }
 
@@ -81,15 +189,80 @@ pub struct GeoInstances {
     pub vertex_buffer: Buffer,
     pub index_buffer: Buffer,
     pub view_matrix_uniform: GeoUniformMatrix,
+    pub screen_size_uniform: GeoUniformVec2,
     pub instance_buffer_manager: InstanceBufferManager,
 }
 
 impl GeoInstances {
-    pub fn add_new(&mut self, queue: Arc<Mutex<Queue>>, transform: Mat4, color: Vec4) {
+    pub fn add_new(
+        &mut self,
+        queue: Arc<Mutex<Queue>>,
+        transform: ComponentTransform,
+        color: Vec4,
+    ) {
         self.instance_buffer_manager
             .add_instance(queue, transform, color);
     }
+
+    pub fn recalc_screen_instances(&mut self, queue: Arc<Mutex<Queue>>, screen: Vec2) {
+        self.instance_buffer_manager
+            .recalc_screen_instances(queue, screen);
+    }
 }
+
+const BUFFER_LAYOUT: [wgpu::VertexBufferLayout<'_>; 2] = [
+    VertexBufferLayout {
+        array_stride: (size_of::<Vec3>() + size_of::<Vec2>()) as BufferAddress,
+        step_mode: VertexStepMode::Vertex,
+        attributes: &[
+            VertexAttribute {
+                // vertex position
+                format: VertexFormat::Float32x3,
+                offset: 0,
+                shader_location: 0,
+            },
+            VertexAttribute {
+                // vertex tex coord
+                format: VertexFormat::Float32x2,
+                offset: size_of::<Vec3>() as u64,
+                shader_location: 1,
+            },
+        ],
+    },
+    VertexBufferLayout {
+        array_stride: size_of::<InstanceData>() as BufferAddress,
+        step_mode: VertexStepMode::Instance,
+        attributes: &[
+            // mat4x4 transform
+            VertexAttribute {
+                offset: 0,
+                shader_location: 5,
+                format: VertexFormat::Float32x4,
+            },
+            VertexAttribute {
+                offset: size_of::<[f32; 4]>() as BufferAddress,
+                shader_location: 6,
+                format: VertexFormat::Float32x4,
+            },
+            VertexAttribute {
+                offset: size_of::<[f32; 8]>() as BufferAddress,
+                shader_location: 7,
+                format: VertexFormat::Float32x4,
+            },
+            VertexAttribute {
+                offset: size_of::<[f32; 12]>() as BufferAddress,
+                shader_location: 8,
+                format: VertexFormat::Float32x4,
+            },
+            // vec4 color
+            VertexAttribute {
+                offset: size_of::<[f32; 16]>() as BufferAddress,
+                shader_location: 9,
+                format: VertexFormat::Float32x4,
+            },
+        ],
+    },
+];
 
 pub struct GeoManager {
     pub device: Arc<Mutex<Device>>,
@@ -115,14 +288,20 @@ impl GeoManager {
 
     pub fn update_view(&mut self, queue: Arc<Mutex<Queue>>, width: u32, height: u32) {
         let queue = queue.lock().unwrap();
-        let aspect = width as f32 / height as f32;
-        let view_matrix = Mat4::orthographic_lh(-aspect, aspect, -1.0, 1.0, -1.0, 1.0);
+        let view_matrix = Mat4::orthographic_lh(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
+        let screen_size = Vec2::new(width as f32, height as f32);
         for ig in self.instance_groups.iter_mut() {
             ig.view_matrix_uniform.matrix = view_matrix;
             queue.write_buffer(
                 &ig.view_matrix_uniform.buffer,
                 0,
                 bytemuck::cast_slice(&[view_matrix]),
+            );
+            ig.screen_size_uniform.vec = screen_size;
+            queue.write_buffer(
+                &ig.screen_size_uniform.buffer,
+                0,
+                bytemuck::cast_slice(&[screen_size]),
             );
         }
     }
@@ -151,51 +330,7 @@ impl GeoManager {
                         vertex: VertexState {
                             module: &ig.render_pipeline_record.shader_module,
                             entry_point: "vs_main",
-                            buffers: &[
-                                // todo future work, this is duplicated from init below; macro?
-                                VertexBufferLayout {
-                                    array_stride: size_of::<Vec4>() as BufferAddress,
-                                    step_mode: VertexStepMode::Vertex,
-                                    attributes: &[VertexAttribute {
-                                        format: VertexFormat::Float32x4,
-                                        offset: 0,
-                                        shader_location: 0,
-                                    }],
-                                },
-                                VertexBufferLayout {
-                                    array_stride: size_of::<InstanceData>() as BufferAddress,
-                                    step_mode: VertexStepMode::Instance,
-                                    attributes: &[
-                                        // mat4x4 transform
-                                        wgpu::VertexAttribute {
-                                            offset: 0,
-                                            shader_location: 5,
-                                            format: VertexFormat::Float32x4,
-                                        },
-                                        wgpu::VertexAttribute {
-                                            offset: size_of::<[f32; 4]>() as BufferAddress,
-                                            shader_location: 6,
-                                            format: VertexFormat::Float32x4,
-                                        },
-                                        wgpu::VertexAttribute {
-                                            offset: size_of::<[f32; 8]>() as BufferAddress,
-                                            shader_location: 7,
-                                            format: VertexFormat::Float32x4,
-                                        },
-                                        wgpu::VertexAttribute {
-                                            offset: size_of::<[f32; 12]>() as BufferAddress,
-                                            shader_location: 8,
-                                            format: VertexFormat::Float32x4,
-                                        },
-                                        // vec4 color
-                                        wgpu::VertexAttribute {
-                                            offset: size_of::<[f32; 16]>() as BufferAddress,
-                                            shader_location: 9,
-                                            format: VertexFormat::Float32x4,
-                                        },
-                                    ],
-                                },
-                            ],
+                            buffers: &BUFFER_LAYOUT,
                         },
                         fragment: Some(FragmentState {
                             module: &ig.render_pipeline_record.shader_module,
@@ -243,9 +378,8 @@ impl GeoManager {
 
         // bind groups and pipeline setup
 
-        // view matrix initialization
-        let aspect = width as f32 / height as f32;
-        let view_matrix = Mat4::orthographic_lh(-aspect, aspect, -1.0, 1.0, -1.0, 1.0);
+        // view matrix uniform setup
+        let view_matrix = Mat4::orthographic_lh(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
         let view_matrix_uniform = GeoUniformMatrix {
             matrix: view_matrix,
             buffer: device.create_buffer_init(&BufferInitDescriptor {
@@ -255,26 +389,58 @@ impl GeoManager {
             }),
         };
 
+        // screen size uniform setup
+        let screen_size = Vec2 {
+            x: width as f32,
+            y: height as f32,
+        };
+        let screen_size_uniform = GeoUniformVec2 {
+            vec: screen_size,
+            buffer: device.create_buffer_init(&BufferInitDescriptor {
+                label: Some("unit square screen_resQ"),
+                contents: bytemuck::cast_slice(&[screen_size]),
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            }),
+        };
+
         // bind group layout and bind group creation
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
-            entries: &[BindGroupLayoutEntry {
-                binding: 0,
-                visibility: ShaderStages::VERTEX,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: BufferSize::new((size_of::<Mat4>()) as u64),
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::VERTEX,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: BufferSize::new((size_of::<Mat4>()) as u64),
+                    },
+                    count: None,
                 },
-                count: None,
-            }],
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: BufferSize::new((size_of::<Vec2>()) as u64),
+                    },
+                    count: None,
+                },
+            ],
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &bind_group_layout,
-            entries: &[BindGroupEntry {
-                binding: 0,
-                resource: view_matrix_uniform.buffer.as_entire_binding(),
-            }],
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: view_matrix_uniform.buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: screen_size_uniform.buffer.as_entire_binding(),
+                },
+            ],
             label: None,
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -291,51 +457,7 @@ impl GeoManager {
                 vertex: VertexState {
                     module: &shader_module,
                     entry_point: "vs_main",
-                    buffers: &[
-                        VertexBufferLayout {
-                            array_stride: size_of::<Vec4>() as BufferAddress,
-                            step_mode: VertexStepMode::Vertex,
-                            attributes: &[VertexAttribute {
-                                format: VertexFormat::Float32x4,
-                                offset: 0,
-                                shader_location: 0,
-                            }],
-                        },
-                        VertexBufferLayout {
-                            array_stride: size_of::<InstanceData>() as BufferAddress,
-                            step_mode: VertexStepMode::Instance,
-                            attributes: &[
-                                // todo replace with macro (and above in instance buffer)
-                                // mat4x4 transform
-                                VertexAttribute {
-                                    offset: 0,
-                                    shader_location: 5,
-                                    format: VertexFormat::Float32x4,
-                                },
-                                VertexAttribute {
-                                    offset: size_of::<[f32; 4]>() as BufferAddress,
-                                    shader_location: 6,
-                                    format: VertexFormat::Float32x4,
-                                },
-                                VertexAttribute {
-                                    offset: size_of::<[f32; 8]>() as BufferAddress,
-                                    shader_location: 7,
-                                    format: VertexFormat::Float32x4,
-                                },
-                                VertexAttribute {
-                                    offset: size_of::<[f32; 12]>() as BufferAddress,
-                                    shader_location: 8,
-                                    format: VertexFormat::Float32x4,
-                                },
-                                // vec4 color
-                                VertexAttribute {
-                                    offset: size_of::<[f32; 16]>() as BufferAddress,
-                                    shader_location: 9,
-                                    format: VertexFormat::Float32x4,
-                                },
-                            ],
-                        },
-                    ],
+                    buffers: &BUFFER_LAYOUT,
                 },
                 fragment: Some(FragmentState {
                     module: &shader_module,
@@ -365,6 +487,7 @@ impl GeoManager {
             vertex_buffer,
             index_buffer,
             view_matrix_uniform,
+            screen_size_uniform,
             instance_buffer_manager: InstanceBufferManager::new(self.device.clone()),
         });
     }

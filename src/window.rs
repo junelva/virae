@@ -1,3 +1,4 @@
+use glam::Vec2;
 use wgpu::{
     CommandEncoderDescriptor, CompositeAlphaMode, Device, DeviceDescriptor, Features, IndexFormat,
     Instance, InstanceDescriptor, Limits, LoadOp, Operations, PresentMode, Queue,
@@ -68,7 +69,8 @@ impl Context<'_> {
     ) -> (EventLoop<()>, Arc<winit::window::Window>, Self) {
         // event loop, window
         let event_loop = EventLoop::new().unwrap();
-        event_loop.set_control_flow(ControlFlow::Poll);
+        event_loop.set_control_flow(ControlFlow::Wait);
+        // event_loop.set_control_flow(ControlFlow::Poll);
         let window = Arc::new(
             WindowBuilder::new()
                 .with_inner_size(LogicalSize::new(width as f64, height as f64))
@@ -86,12 +88,15 @@ impl Context<'_> {
             .request_adapter(&RequestAdapterOptions::default())
             .await
             .unwrap();
+
+        // this will prevent resizing the window larger from crashing.
+        let needed_limits = Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits());
         let (device, queue) = adapter
             .request_device(
                 &DeviceDescriptor {
                     label: None,
                     required_features: Features::empty(),
-                    required_limits: Limits::downlevel_defaults(),
+                    required_limits: needed_limits,
                 },
                 None,
             )
@@ -162,6 +167,12 @@ impl Context<'_> {
         surface.configure(&device, &config);
         self.geos
             .update_view(self.queue.clone(), config.width, config.height);
+        for group in self.geos.instance_groups.iter_mut() {
+            group.recalc_screen_instances(
+                self.queue.clone(),
+                Vec2::new(config.width as f32, config.height as f32),
+            )
+        }
     }
 
     pub fn render(&mut self) {
