@@ -1,13 +1,6 @@
-use geo::{ComponentTransform, PixelRect};
-use glam::{Vec2, Vec4};
-use wgpu::hal::Rect;
-use winit::event::{Event, WindowEvent};
-
-mod geo;
-mod text;
-mod window;
-
-use crate::window::Context;
+use virae::types::{ComponentTransform, PixelRect};
+use virae::window::Context;
+use virae::{Event, HalRect, Vec2, Vec4, WindowEvent};
 
 fn main() {
     pollster::block_on(run());
@@ -15,22 +8,27 @@ fn main() {
 
 async fn run() {
     let (width, height) = (800, 600);
-    let (event_loop, window, mut context) = Context::new("virae", width, height).await;
+    let (event_loop, window, mut context) = Context::new("testing", width, height).await;
 
     {
-        let shader_path = "shaders/shader.wgsl";
-        let config = context.config.lock().unwrap();
-        context
-            .geos
-            .new_unit_square(config.format, config.width, config.height, shader_path);
+        let shader_path = "examples/testing/shader.wgsl";
         context.file_watcher.add_path(shader_path);
+        let config = context.config.lock().unwrap();
+        context.geos.new_unit_square(
+            16,
+            config.format,
+            config.width,
+            config.height,
+            None,
+            shader_path,
+        );
 
         // test labels
-        for i in 0..8 {
-            let x = 45.0 * i as f32;
-            let y = 45.0 * i as f32;
-            let w = 45.0;
-            let h = 45.0;
+        for i in 0..4 {
+            let x = 155.0 * i as f32;
+            let y = 155.0 * i as f32;
+            let w = 85.0;
+            let h = 85.0;
             context.geos.instance_groups[0].add_new(
                 context.queue.clone(),
                 ComponentTransform::pixel_rect_to_screen_transform(PixelRect {
@@ -41,7 +39,7 @@ async fn run() {
                 Vec4::new(0.1, 0.1, 0.2, 1.0),
             );
             context.texts.new_text(
-                Rect {
+                HalRect {
                     x: x as f64 + 2.5,
                     y: y as f64 + 2.5,
                     w: w as f64,

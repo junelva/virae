@@ -18,11 +18,15 @@ var<uniform> view: mat4x4<f32>;
 var<uniform> screen_size: vec2<f32>;
 
 struct InstanceInput {
-    @location(5) transform_0: vec4<f32>,
-    @location(6) transform_1: vec4<f32>,
-    @location(7) transform_2: vec4<f32>,
-    @location(8) transform_3: vec4<f32>,
-    @location(9) color: vec4<f32>,
+    @location(5) tex_transform_0: vec4<f32>,
+    @location(6) tex_transform_1: vec4<f32>,
+    @location(7) tex_transform_2: vec4<f32>,
+    @location(8) tex_transform_3: vec4<f32>,
+    @location(9) transform_0: vec4<f32>,
+    @location(10) transform_1: vec4<f32>,
+    @location(11) transform_2: vec4<f32>,
+    @location(12) transform_3: vec4<f32>,
+    @location(13) color: vec4<f32>,
 };
 
 @vertex
@@ -30,6 +34,12 @@ fn vs_main(
     vin: VertexInput,
     instance: InstanceInput,
 ) -> VertexOutput {
+    let tex_transform = mat4x4<f32>(
+        instance.tex_transform_0,
+        instance.tex_transform_1,
+        instance.tex_transform_2,
+        instance.tex_transform_3,
+    );
     let transform = mat4x4<f32>(
         instance.transform_0,
         instance.transform_1,
@@ -38,20 +48,13 @@ fn vs_main(
     );
     var result: VertexOutput;
     result.position = view * transform * vec4(vin.position, 1.0);
-    result.tex_coords = vin.tex_coords;
+    result.tex_coords = (tex_transform * vec4(vin.tex_coords, 0.0, 1.0)).xy;
     result.color = instance.color;
     return result;
 }
 
 @fragment
 fn fs_main(vout: VertexOutput) -> @location(0) vec4<f32> {
-    // given screen size, calculate pixel coordinate of screen position
     let uv = vout.tex_coords;
-    // let px_pos = (vout.position.xy * 0.5 + vec2(0.5)) * screen_size;
-    let uv_px = vec2(1.0 / screen_size.x, 1.0 / screen_size.y);
-    let left = step(uv, vec2(0.05));
-    let bott = step(1.0 - uv, vec2(0.05));
-    let border = 1.0 - min(max(left.x + left.y + bott.x + bott.y, 0.0), 1.0);
-    return vec4(vout.color.rgb * border, 1.0);
-    // return vec4(vec2(px / screen_size), 0.0, 1.0);
+    return vec4(uv, 0.0, 1.0);
 }
