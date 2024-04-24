@@ -1,22 +1,26 @@
 #![allow(dead_code)]
-
 use crate::types::{
     ComponentTransform, GeoUniformMatrix, GeoUniformVec2, InstanceBufferManager,
     RenderPipelineRecord, TextureSheet, TextureSheetDefinition, UNIT_SQUARE_BUFFER_LAYOUT,
     UNIT_SQUARE_INDICES, UNIT_SQUARE_VERTICES,
 };
+use image::io::Reader;
+use image::RgbaImage;
 use std::borrow::Cow;
 use std::fs::read_to_string;
 use std::mem::size_of;
+use std::path::Path;
+// use std::path::Path;
 use std::sync::{Arc, Mutex};
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 
 use glam::{Mat4, Vec2, Vec4};
 use wgpu::{
-    BindGroup, BindGroupEntry, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType,
-    Buffer, BufferBindingType, BufferSize, BufferUsages, Device, Face, FragmentState,
-    MultisampleState, PrimitiveState, Queue, RenderPipelineDescriptor, ShaderModuleDescriptor,
-    ShaderSource, ShaderStages, TextureFormat, VertexState,
+    BindGroup, BindGroupEntry, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource,
+    BindingType, Buffer, BufferBindingType, BufferSize, BufferUsages, Device, Extent3d, Face,
+    FragmentState, MultisampleState, PrimitiveState, Queue, RenderPipelineDescriptor,
+    ShaderModuleDescriptor, ShaderSource, ShaderStages, TextureDescriptor, TextureFormat,
+    VertexState,
 };
 
 // various things needed to render geometry.
@@ -25,7 +29,7 @@ pub struct GeoInstances {
     pub bind_group: BindGroup,
     pub vertex_buffer: Buffer,
     pub index_buffer: Buffer,
-    pub texture_sheet: Option<TextureSheet>,
+    pub sheet: TextureSheet,
     pub view_matrix_uniform: GeoUniformMatrix,
     pub screen_size_uniform: GeoUniformVec2,
     pub instance_buffer_manager: InstanceBufferManager,
@@ -48,16 +52,101 @@ impl GeoInstances {
     }
 }
 
+fn load_texture(
+    device: Arc<Mutex<Device>>,
+    queue: Arc<Mutex<Queue>>,
+    sheet_info: TextureSheetDefinition,
+) -> TextureSheet {
+    let device = device.lock().unwrap();
+    let queue = queue.lock().unwrap();
+    let (image, path): (RgbaImage, String) = {
+        let texture_exists = Path::new(&sheet_info.path).try_exists().unwrap();
+        if texture_exists {
+            let result: (RgbaImage, String) = (
+                Reader::open(sheet_info.path.clone())
+                    .unwrap()
+                    .decode()
+                    .unwrap()
+                    .to_rgba8(),
+                sheet_info.path.clone(),
+            );
+            result
+        } else {
+            let result: (RgbaImage, String) = (
+                image::load_from_memory(include_bytes!("../images/1x1white.png"))
+                    .unwrap()
+                    .to_rgba8(),
+                "../images/1x1white.png".to_string(),
+            );
+            result
+        }
+    };
+
+    let dimensions = image.dimensions();
+    let extent = Extent3d {
+        width: dimensions.0,
+        height: dimensions.1,
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&TextureDescriptor {
+        size: extent,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        label: Some(&path),
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::ImageCopyTexture {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &image,
+        wgpu::ImageDataLayout {
+            offset: 0,
+            bytes_per_row: Some(4 * dimensions.0),
+            rows_per_image: Some(dimensions.1),
+        },
+        extent,
+    );
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_w: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Nearest,
+        mipmap_filter: wgpu::FilterMode::Nearest,
+        ..Default::default()
+    });
+    TextureSheet {
+        sheet_info,
+        texture,
+        sampler,
+        view,
+    }
+}
+
 pub struct GeoManager {
     pub device: Arc<Mutex<Device>>,
+    pub queue: Arc<Mutex<Queue>>,
     pub format: TextureFormat,
     pub instance_groups: Vec<GeoInstances>,
 }
 
 impl GeoManager {
-    pub fn new(device: Arc<Mutex<Device>>, format: TextureFormat) -> Self {
+    pub fn new(
+        device: Arc<Mutex<Device>>,
+        queue: Arc<Mutex<Queue>>,
+        format: TextureFormat,
+    ) -> Self {
         Self {
             device,
+            queue,
             format,
             instance_groups: vec![],
         }
@@ -139,18 +228,21 @@ impl GeoManager {
         format: TextureFormat,
         width: u32,
         height: u32,
-        _sheet_data: Option<TextureSheetDefinition>,
+        sheet_info: TextureSheetDefinition,
         shader_path: &str,
     ) {
+        // prepare texture sheet data
+        let sheet = load_texture(self.device.clone(), self.queue.clone(), sheet_info);
+
         let device = self.device.lock().unwrap();
 
-        // shader
+        // compile shader code
         let shader_module = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("test shader"),
             source: ShaderSource::Wgsl(Cow::Borrowed(&*read_to_string(shader_path).unwrap())),
         });
 
-        // vertex and index buffers, layout
+        // vertex and index buffers
         let vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
             label: Some("unit square vertices"),
             contents: bytemuck::cast_slice(&UNIT_SQUARE_VERTICES),
@@ -161,8 +253,6 @@ impl GeoManager {
             contents: bytemuck::cast_slice(&UNIT_SQUARE_INDICES),
             usage: BufferUsages::INDEX,
         });
-
-        // bind groups and pipeline setup
 
         // view matrix uniform setup
         let view_matrix = Mat4::orthographic_lh(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
@@ -189,7 +279,7 @@ impl GeoManager {
             }),
         };
 
-        // bind group layout and bind group creation
+        // bind group layout and bind group creation; pipeline layout
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
             entries: &[
@@ -213,6 +303,22 @@ impl GeoManager {
                     },
                     count: None,
                 },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -226,6 +332,14 @@ impl GeoManager {
                     binding: 1,
                     resource: screen_size_uniform.buffer.as_entire_binding(),
                 },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::TextureView(&sheet.view),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: BindingResource::Sampler(&sheet.sampler),
+                },
             ],
             label: None,
         });
@@ -235,7 +349,7 @@ impl GeoManager {
             push_constant_ranges: &[],
         });
 
-        // pipeline itself, with necessary components for reconstruction retained.
+        // render pipeline itself, with necessary components for reconstruction retained.
         let render_pipeline_record = RenderPipelineRecord {
             render_pipeline: device.create_render_pipeline(&RenderPipelineDescriptor {
                 label: Some("unit square pipeline"),
@@ -272,7 +386,7 @@ impl GeoManager {
             bind_group,
             vertex_buffer,
             index_buffer,
-            texture_sheet: None,
+            sheet,
             view_matrix_uniform,
             screen_size_uniform,
             instance_buffer_manager: InstanceBufferManager::new(max_instances, self.device.clone()),

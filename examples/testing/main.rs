@@ -1,4 +1,4 @@
-use virae::types::{ComponentTransform, PixelRect};
+use virae::types::{ComponentTransform, PixelRect, TextureSheetDefinition};
 use virae::window::Context;
 use virae::{Event, HalRect, Vec2, Vec4, WindowEvent};
 
@@ -19,7 +19,7 @@ async fn run() {
             config.format,
             config.width,
             config.height,
-            None,
+            TextureSheetDefinition::none(),
             shader_path,
         );
 

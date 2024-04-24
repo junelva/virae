@@ -15,7 +15,8 @@ The eventual goal is to make art.
 what follows in this zone is random notetaking,
 often out of order and simply used as scratch.
 
-- [ ] implement screen sprite rendering
+- [ ] increase usage of `?` operator
+- [ ] implement texture/sprite rendering
 - [x] add texture to unit square? option?
 - [ ] integrate an ecs - flax? survey.
 - [x] api-ify the engine-y usage design.

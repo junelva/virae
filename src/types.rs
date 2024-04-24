@@ -8,7 +8,10 @@ use std::{
 
 use bytemuck::{ByteEq, ByteHash, Pod, Zeroable};
 use glam::{Mat4, Vec2, Vec3, Vec4};
-use wgpu::util::{BufferInitDescriptor, DeviceExt};
+use wgpu::{
+    util::{BufferInitDescriptor, DeviceExt},
+    Sampler, Texture, TextureView,
+};
 use wgpu::{
     Buffer, BufferAddress, BufferUsages, Device, PipelineLayout, Queue, RenderPipeline,
     ShaderModule, TextureFormat, VertexAttribute, VertexBufferLayout, VertexFormat, VertexStepMode,
@@ -236,14 +239,8 @@ impl InstanceBufferManager {
     }
 }
 
-pub enum TextureSheetClusterType {
-    Tiles,
-    Animation,
-}
-
 pub struct TextureSheetClusterDefinition {
     label: String,
-    ty: TextureSheetClusterType,
     size: UVec2,
     offset: UVec2,
     spacing: usize,
@@ -254,10 +251,20 @@ pub struct TextureSheetDefinition {
     pub clusters: Vec<TextureSheetClusterDefinition>,
 }
 
+impl TextureSheetDefinition {
+    pub fn none() -> Self {
+        Self {
+            path: "".to_string(),
+            clusters: vec![],
+        }
+    }
+}
+
 pub struct TextureSheet {
-    pub path: String,
-    pub def: TextureSheetDefinition,
-    pub buffer: Buffer,
+    pub sheet_info: TextureSheetDefinition,
+    pub texture: Texture,
+    pub sampler: Sampler,
+    pub view: TextureView,
 }
 
 #[derive(Copy, Clone)]

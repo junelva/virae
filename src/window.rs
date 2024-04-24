@@ -129,13 +129,13 @@ impl Context<'_> {
             window,
             Self {
                 device: device_arc.clone(),
-                queue: queue_arc,
+                queue: queue_arc.clone(),
                 surface: Arc::<Mutex<Surface>>::new(Mutex::new(surface)),
                 config: Arc::<Mutex<SurfaceConfiguration>>::new(Mutex::new(config)),
                 swapchain_format,
                 scale_factor,
                 texts,
-                geos: GeoManager::new(device_arc.clone(), swapchain_format),
+                geos: GeoManager::new(device_arc.clone(), queue_arc.clone(), swapchain_format),
                 file_watcher: FileWatcher::new(),
             },
         )
