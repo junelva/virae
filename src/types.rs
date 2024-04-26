@@ -213,7 +213,10 @@ impl InstanceBufferManager {
         let queue = queue.lock().unwrap();
         for (i, instance) in self.data.iter_mut().enumerate() {
             if instance.transform.pixel_rect.is_some() {
-                let pr = instance.transform.pixel_rect.unwrap();
+                let pr = instance
+                    .transform
+                    .pixel_rect
+                    .expect("pixel rect unwrap error");
                 instance.transform =
                     ComponentTransform::pixel_rect_to_screen_transform(PixelRect {
                         xy: pr.xy,
@@ -240,10 +243,10 @@ impl InstanceBufferManager {
 }
 
 pub struct TextureSheetClusterDefinition {
-    label: String,
-    size: UVec2,
-    offset: UVec2,
-    spacing: usize,
+    pub label: String,
+    pub size: UVec2,
+    pub offset: UVec2,
+    pub spacing: usize,
 }
 
 pub struct TextureSheetDefinition {

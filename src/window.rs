@@ -12,6 +12,7 @@ use winit::{
 };
 
 use std::{
+    error::Error,
     fs::metadata,
     sync::{Arc, Mutex},
     time::SystemTime,
@@ -66,7 +67,7 @@ impl Context<'_> {
         title: &str,
         width: u32,
         height: u32,
-    ) -> (EventLoop<()>, Arc<winit::window::Window>, Self) {
+    ) -> Result<(EventLoop<()>, Arc<winit::window::Window>, Self), Box<dyn Error>> {
         // event loop, window
         let event_loop = EventLoop::new().unwrap();
         event_loop.set_control_flow(ControlFlow::Wait);
@@ -76,8 +77,7 @@ impl Context<'_> {
                 .with_inner_size(LogicalSize::new(width as f64, height as f64))
                 .with_decorations(true)
                 .with_title(title)
-                .build(&event_loop)
-                .unwrap(),
+                .build(&event_loop)?,
         );
         let size = window.inner_size();
         let scale_factor = window.scale_factor();
@@ -87,7 +87,7 @@ impl Context<'_> {
         let adapter = instance
             .request_adapter(&RequestAdapterOptions::default())
             .await
-            .unwrap();
+            .expect("wgpu request_adapter failed");
 
         // this will prevent resizing the window larger from crashing.
         let needed_limits = Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits());
@@ -100,8 +100,7 @@ impl Context<'_> {
                 },
                 None,
             )
-            .await
-            .unwrap();
+            .await?;
 
         // surface, format, config
         let surface = instance
@@ -124,7 +123,7 @@ impl Context<'_> {
         let queue_arc = Arc::<Mutex<Queue>>::new(Mutex::new(queue));
         let texts = TextCollection::new(device_arc.clone(), queue_arc.clone(), swapchain_format);
 
-        (
+        Ok((
             event_loop,
             window,
             Self {
@@ -138,24 +137,26 @@ impl Context<'_> {
                 geos: GeoManager::new(device_arc.clone(), queue_arc.clone(), swapchain_format),
                 file_watcher: FileWatcher::new(),
             },
-        )
+        ))
     }
 
-    pub fn check_watched_files(&mut self) {
+    pub fn check_watched_files(&mut self) -> Result<(), Box<dyn Error>> {
         for fwe in self.file_watcher.entries.iter_mut() {
-            let metadata = metadata(&*fwe.path).unwrap();
+            let metadata = metadata(&*fwe.path)?;
             if metadata.modified().unwrap() > fwe.last_modified {
                 match fwe.action {
                     FileWatcherAction::ReloadShader => {
-                        self.geos.reload_shader(self.device.clone(), &fwe.path)
+                        self.geos.reload_shader(self.device.clone(), &fwe.path)?;
                     }
                 }
             }
         }
+        Ok(())
     }
 
-    pub fn update(&mut self) {
-        self.check_watched_files();
+    pub fn update(&mut self) -> Result<(), Box<dyn Error>> {
+        self.check_watched_files()?;
+        Ok(())
     }
 
     pub fn resize(&mut self, size: PhysicalSize<u32>) {
@@ -175,7 +176,7 @@ impl Context<'_> {
         }
     }
 
-    pub fn render(&mut self) {
+    pub fn render(&mut self) -> Result<(), Box<dyn Error>> {
         let config = self.config.lock().unwrap();
 
         self.texts.prepare(
@@ -183,13 +184,13 @@ impl Context<'_> {
             self.queue.clone(),
             config.width,
             config.height,
-        );
+        )?;
 
         let device = self.device.lock().unwrap();
         let queue = self.queue.lock().unwrap();
         let surface = self.surface.lock().unwrap();
 
-        let frame = surface.get_current_texture().unwrap();
+        let frame = surface.get_current_texture()?;
         let view = frame.texture.create_view(&TextureViewDescriptor::default());
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
         {
@@ -237,12 +238,13 @@ impl Context<'_> {
             // include text labels in pass
             self.texts
                 .text_renderer
-                .render(&self.texts.atlas, &mut pass)
-                .unwrap();
+                .render(&self.texts.atlas, &mut pass)?;
         }
 
         queue.submit(Some(encoder.finish()));
         frame.present();
         self.texts.trim_atlas();
+
+        Ok(())
     }
 }

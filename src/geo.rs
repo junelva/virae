@@ -6,12 +6,14 @@ use crate::types::{
 };
 use image::io::Reader;
 use image::RgbaImage;
-use std::borrow::Cow;
-use std::fs::read_to_string;
-use std::mem::size_of;
-use std::path::Path;
-// use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::{
+    borrow::Cow,
+    error::Error,
+    fs::read_to_string,
+    mem::size_of,
+    path::Path,
+    sync::{Arc, Mutex},
+};
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 
 use glam::{Mat4, Vec2, Vec4};
@@ -56,26 +58,20 @@ fn load_texture(
     device: Arc<Mutex<Device>>,
     queue: Arc<Mutex<Queue>>,
     sheet_info: TextureSheetDefinition,
-) -> TextureSheet {
+) -> Result<TextureSheet, Box<dyn Error>> {
     let device = device.lock().unwrap();
     let queue = queue.lock().unwrap();
     let (image, path): (RgbaImage, String) = {
-        let texture_exists = Path::new(&sheet_info.path).try_exists().unwrap();
+        let texture_exists = Path::new(&sheet_info.path).try_exists()?;
         if texture_exists {
             let result: (RgbaImage, String) = (
-                Reader::open(sheet_info.path.clone())
-                    .unwrap()
-                    .decode()
-                    .unwrap()
-                    .to_rgba8(),
+                Reader::open(sheet_info.path.clone())?.decode()?.to_rgba8(),
                 sheet_info.path.clone(),
             );
             result
         } else {
             let result: (RgbaImage, String) = (
-                image::load_from_memory(include_bytes!("../images/1x1white.png"))
-                    .unwrap()
-                    .to_rgba8(),
+                image::load_from_memory(include_bytes!("../images/1x1white.png"))?.to_rgba8(),
                 "../images/1x1white.png".to_string(),
             );
             result
@@ -123,12 +119,13 @@ fn load_texture(
         mipmap_filter: wgpu::FilterMode::Nearest,
         ..Default::default()
     });
-    TextureSheet {
+
+    Ok(TextureSheet {
         sheet_info,
         texture,
         sampler,
         view,
-    }
+    })
 }
 
 pub struct GeoManager {
@@ -179,7 +176,11 @@ impl GeoManager {
         }
     }
 
-    pub fn reload_shader(&mut self, device: Arc<Mutex<wgpu::Device>>, shader_path: &str) {
+    pub fn reload_shader(
+        &mut self,
+        device: Arc<Mutex<wgpu::Device>>,
+        shader_path: &str,
+    ) -> Result<(), Box<dyn Error>> {
         let device = device.lock().unwrap();
 
         // for every instance group...
@@ -190,9 +191,7 @@ impl GeoManager {
                 ig.render_pipeline_record.shader_module =
                     device.create_shader_module(ShaderModuleDescriptor {
                         label: Some(&*format!("shader {}", shader_path)),
-                        source: ShaderSource::Wgsl(Cow::Borrowed(
-                            &*read_to_string(shader_path).unwrap(),
-                        )),
+                        source: ShaderSource::Wgsl(Cow::Borrowed(&*read_to_string(shader_path)?)),
                     });
 
                 // and rebuild the render pipeline.
@@ -220,6 +219,7 @@ impl GeoManager {
                     });
             }
         }
+        Ok(())
     }
 
     pub fn new_unit_square(
@@ -230,16 +230,16 @@ impl GeoManager {
         height: u32,
         sheet_info: TextureSheetDefinition,
         shader_path: &str,
-    ) {
+    ) -> Result<(), Box<dyn Error>> {
         // prepare texture sheet data
-        let sheet = load_texture(self.device.clone(), self.queue.clone(), sheet_info);
+        let sheet = load_texture(self.device.clone(), self.queue.clone(), sheet_info)?;
 
         let device = self.device.lock().unwrap();
 
         // compile shader code
         let shader_module = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("test shader"),
-            source: ShaderSource::Wgsl(Cow::Borrowed(&*read_to_string(shader_path).unwrap())),
+            label: Some(shader_path),
+            source: ShaderSource::Wgsl(Cow::Borrowed(&*read_to_string(shader_path)?)),
         });
 
         // vertex and index buffers
@@ -391,5 +391,7 @@ impl GeoManager {
             screen_size_uniform,
             instance_buffer_manager: InstanceBufferManager::new(max_instances, self.device.clone()),
         });
+
+        Ok(())
     }
 }

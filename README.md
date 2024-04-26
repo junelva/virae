@@ -4,9 +4,7 @@
 This engine is not yet operational!
 ```
 
-I can only work on this in my free time.
-
-The eventual goal is to make art.
+This is a personal game engine. The architecture is not designed for expansive, high-performance work. All project-specific content is expected to be initialized up-front. I can only work on this in my free time. The eventual goal is to make art. If you want to make use of it, feel free to reach out.
 
 #### development log and planning.
 ```
@@ -15,8 +13,9 @@ The eventual goal is to make art.
 what follows in this zone is random notetaking,
 often out of order and simply used as scratch.
 
-- [ ] increase usage of `?` operator
-- [ ] implement texture/sprite rendering
+- [x] increase usage of `?` operator & expect
+- [x] implement texture/sprite rendering
+- [ ] blending modes for transparent textures
 - [x] add texture to unit square? option?
 - [ ] integrate an ecs - flax? survey.
 - [x] api-ify the engine-y usage design.

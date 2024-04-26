@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{error::Error, sync::Arc};
 
 use glyphon::{
     Attrs, Buffer, Color, Family, FontSystem, Metrics, Resolution, Shaping, SwashCache, TextArea,
@@ -86,30 +86,29 @@ impl TextCollection {
         queue: Arc<std::sync::Mutex<wgpu::Queue>>,
         screen_width: u32,
         screen_height: u32,
-    ) {
+    ) -> Result<(), Box<dyn Error>> {
         let device = device.lock().unwrap();
         let queue = queue.lock().unwrap();
 
-        self.text_renderer
-            .prepare(
-                &device,
-                &queue,
-                &mut self.font_system,
-                &mut self.atlas,
-                Resolution {
-                    width: screen_width,
-                    height: screen_height,
-                },
-                self.texts.iter().map(|t| TextArea {
-                    buffer: &t.buffer,
-                    left: t.left as f32,
-                    top: t.top as f32,
-                    scale: t.scale as f32,
-                    bounds: t.bounds,
-                    default_color: t.default_color,
-                }),
-                &mut self.cache,
-            )
-            .unwrap();
+        self.text_renderer.prepare(
+            &device,
+            &queue,
+            &mut self.font_system,
+            &mut self.atlas,
+            Resolution {
+                width: screen_width,
+                height: screen_height,
+            },
+            self.texts.iter().map(|t| TextArea {
+                buffer: &t.buffer,
+                left: t.left as f32,
+                top: t.top as f32,
+                scale: t.scale as f32,
+                bounds: t.bounds,
+                default_color: t.default_color,
+            }),
+            &mut self.cache,
+        )?;
+        Ok(())
     }
 }

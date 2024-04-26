@@ -9,13 +9,14 @@ struct VertexOutput {
     @location(1) color: vec4<f32>,
 };
 
-@group(0)
-@binding(0)
+@group(0) @binding(0)
 var<uniform> view: mat4x4<f32>;
-
-@group(0)
-@binding(1)
+@group(0) @binding(1)
 var<uniform> screen_size: vec2<f32>;
+@group(0) @binding(2)
+var texture: texture_2d<f32>;
+@group(0) @binding(3)
+var texture_sampler: sampler;
 
 struct InstanceInput {
     @location(5) tex_transform_0: vec4<f32>,
@@ -56,5 +57,6 @@ fn vs_main(
 @fragment
 fn fs_main(vout: VertexOutput) -> @location(0) vec4<f32> {
     let uv = vout.tex_coords;
-    return vec4(uv, 0.0, 1.0);
+    return vout.color * textureSample(texture, texture_sampler, uv);
+    // return vec4(uv, 0.0, 1.0);
 }
