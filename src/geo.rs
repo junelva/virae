@@ -14,9 +14,12 @@ use std::{
     path::Path,
     sync::{Arc, Mutex},
 };
-use wgpu::util::{BufferInitDescriptor, DeviceExt};
+use wgpu::{
+    util::{BufferInitDescriptor, DeviceExt},
+    BlendState, ColorTargetState, ColorWrites,
+};
 
-use glam::{Mat4, Vec2, Vec4};
+use glam::{Mat4, UVec2, Vec2, Vec4};
 use wgpu::{
     BindGroup, BindGroupEntry, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource,
     BindingType, Buffer, BufferBindingType, BufferSize, BufferUsages, Device, Extent3d, Face,
@@ -42,13 +45,19 @@ impl GeoInstances {
         &mut self,
         queue: Arc<Mutex<Queue>>,
         transform: ComponentTransform,
+        cluster_index: usize,
+        sub_index: usize,
         color: Vec4,
     ) {
-        self.instance_buffer_manager
-            .add_instance(queue, None, transform, color);
+        self.instance_buffer_manager.add_instance(
+            queue,
+            transform,
+            self.sheet.cluster_sub_transform(cluster_index, sub_index),
+            color,
+        );
     }
 
-    pub fn recalc_screen_instances(&mut self, queue: Arc<Mutex<Queue>>, screen: Vec2) {
+    pub fn recalc_screen_instances(&mut self, queue: Arc<Mutex<Queue>>, screen: UVec2) {
         self.instance_buffer_manager
             .recalc_screen_instances(queue, screen);
     }
@@ -114,7 +123,7 @@ fn load_texture(
         address_mode_u: wgpu::AddressMode::ClampToEdge,
         address_mode_v: wgpu::AddressMode::ClampToEdge,
         address_mode_w: wgpu::AddressMode::ClampToEdge,
-        mag_filter: wgpu::FilterMode::Linear,
+        mag_filter: wgpu::FilterMode::Nearest,
         min_filter: wgpu::FilterMode::Nearest,
         mipmap_filter: wgpu::FilterMode::Nearest,
         ..Default::default()
@@ -122,6 +131,7 @@ fn load_texture(
 
     Ok(TextureSheet {
         sheet_info,
+        dimensions: UVec2::new(dimensions.0, dimensions.1),
         texture,
         sampler,
         view,
@@ -207,7 +217,11 @@ impl GeoManager {
                         fragment: Some(FragmentState {
                             module: &ig.render_pipeline_record.shader_module,
                             entry_point: "fs_main",
-                            targets: &[Some(ig.render_pipeline_record.format.into())],
+                            targets: &[Some(ColorTargetState {
+                                format: ig.render_pipeline_record.format,
+                                blend: Some(BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                                write_mask: ColorWrites::ALL,
+                            })],
                         }),
                         primitive: PrimitiveState {
                             cull_mode: None,
@@ -362,7 +376,11 @@ impl GeoManager {
                 fragment: Some(FragmentState {
                     module: &shader_module,
                     entry_point: "fs_main",
-                    targets: &[Some(format.into())],
+                    targets: &[Some(ColorTargetState {
+                        format,
+                        blend: Some(BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                        write_mask: ColorWrites::ALL,
+                    })],
                 }),
                 primitive: PrimitiveState {
                     cull_mode: Some(Face::Back),

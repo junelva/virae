@@ -15,8 +15,8 @@ often out of order and simply used as scratch.
 
 - [x] increase usage of `?` operator & expect
 - [x] implement texture/sprite rendering
-- [ ] blending modes for transparent textures
-- [x] add texture to unit square? option?
+> [x] blending modes for transparent textures
+> [x] sprite sheets to instance uv transforms
 - [ ] integrate an ecs - flax? survey.
 - [x] api-ify the engine-y usage design.
 - [ ] create example game using said api.

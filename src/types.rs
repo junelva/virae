@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use glam::{Quat, UVec2};
 use std::{
     mem::size_of,
@@ -67,7 +65,7 @@ pub const UNIT_SQUARE_BUFFER_LAYOUT: [VertexBufferLayout<'_>; 2] = [
         array_stride: size_of::<InstanceData>() as BufferAddress,
         step_mode: VertexStepMode::Instance,
         attributes: &[
-            // mat4x4 texture transform
+            // mat4x4 transform
             VertexAttribute {
                 offset: 0,
                 shader_location: 5,
@@ -88,7 +86,7 @@ pub const UNIT_SQUARE_BUFFER_LAYOUT: [VertexBufferLayout<'_>; 2] = [
                 shader_location: 8,
                 format: VertexFormat::Float32x4,
             },
-            // mat4x4 transform
+            // mat4x4 texture transform
             VertexAttribute {
                 offset: size_of::<[f32; 16]>() as BufferAddress,
                 shader_location: 9,
@@ -138,24 +136,24 @@ pub struct GeoUniformMatrix {
 }
 
 pub struct Instance {
-    pub tex_transform: ComponentTransform,
     pub transform: ComponentTransform,
+    pub tex_transform: ComponentTransform,
     pub color: Vec4,
 }
 
 #[derive(Copy, Clone, Pod, Zeroable, ByteEq, ByteHash)]
 #[repr(C)]
 pub struct InstanceData {
-    pub tex_transform: Mat4,
     pub transform: Mat4,
+    pub tex_transform: Mat4,
     pub color: Vec4,
 }
 
 impl Default for InstanceData {
     fn default() -> Self {
         InstanceData {
-            tex_transform: Mat4::IDENTITY,
             transform: Mat4::IDENTITY,
+            tex_transform: Mat4::IDENTITY,
             color: Vec4::new(1.0, 1.0, 1.0, 1.0),
         }
     }
@@ -183,18 +181,14 @@ impl InstanceBufferManager {
     pub fn add_instance(
         &mut self,
         queue: Arc<Mutex<Queue>>,
-        _tex_transform: Option<ComponentTransform>,
         transform: ComponentTransform,
+        tex_transform: ComponentTransform,
         color: Vec4,
     ) {
         let queue = queue.lock().unwrap();
         let new_data = InstanceData {
-            tex_transform: Mat4::IDENTITY,
-            transform: Mat4::from_scale_rotation_translation(
-                transform.scale,
-                transform.rotation,
-                transform.location,
-            ),
+            transform: transform.to_mat4(),
+            tex_transform: tex_transform.to_mat4(),
             color,
         };
         queue.write_buffer(
@@ -203,13 +197,13 @@ impl InstanceBufferManager {
             bytemuck::cast_slice(&[new_data]),
         );
         self.data.push(Instance {
-            tex_transform: ComponentTransform::default(),
             transform,
+            tex_transform,
             color,
         });
     }
 
-    pub fn recalc_screen_instances(&mut self, queue: Arc<Mutex<Queue>>, screen: Vec2) {
+    pub fn recalc_screen_instances(&mut self, queue: Arc<Mutex<Queue>>, screen: UVec2) {
         let queue = queue.lock().unwrap();
         for (i, instance) in self.data.iter_mut().enumerate() {
             if instance.transform.pixel_rect.is_some() {
@@ -218,18 +212,14 @@ impl InstanceBufferManager {
                     .pixel_rect
                     .expect("pixel rect unwrap error");
                 instance.transform =
-                    ComponentTransform::pixel_rect_to_screen_transform(PixelRect {
+                    ComponentTransform::unit_square_transform_from_pixel_rect(PixelRect {
                         xy: pr.xy,
                         wh: pr.wh,
-                        screen,
+                        extent: screen,
                     });
                 let new_data = InstanceData {
-                    tex_transform: Mat4::IDENTITY,
-                    transform: Mat4::from_scale_rotation_translation(
-                        instance.transform.scale,
-                        instance.transform.rotation,
-                        instance.transform.location,
-                    ),
+                    transform: instance.transform.to_mat4(),
+                    tex_transform: instance.tex_transform.to_mat4(),
                     color: instance.color,
                 };
                 queue.write_buffer(
@@ -244,9 +234,10 @@ impl InstanceBufferManager {
 
 pub struct TextureSheetClusterDefinition {
     pub label: String,
-    pub size: UVec2,
     pub offset: UVec2,
-    pub spacing: usize,
+    pub cluster_size: UVec2,
+    pub sub_size: UVec2,
+    pub spacing: UVec2,
 }
 
 pub struct TextureSheetDefinition {
@@ -265,16 +256,46 @@ impl TextureSheetDefinition {
 
 pub struct TextureSheet {
     pub sheet_info: TextureSheetDefinition,
+    pub dimensions: UVec2,
     pub texture: Texture,
     pub sampler: Sampler,
     pub view: TextureView,
 }
 
+impl TextureSheet {
+    pub fn cluster_sub_transform(
+        &self,
+        cluster_index: usize,
+        sub_index: usize,
+    ) -> ComponentTransform {
+        let c /*cluster*/ = &self.sheet_info.clusters[cluster_index];
+        let rc /*row count*/ = {
+            let mut rc = 0;
+            for _ in (0..c.cluster_size.x).step_by((c.sub_size.x + c.spacing.x) as usize) {
+                rc += 1;
+            }
+            rc
+        };
+
+        let row_index = sub_index as u32 / rc;
+        let col_index = sub_index as u32 % rc;
+
+        let x_offset = c.offset.x + col_index * (c.sub_size.x + c.spacing.x);
+        let y_offset = c.offset.y + row_index * (c.sub_size.y + c.spacing.y);
+
+        ComponentTransform::tex_transform_from_pixel_rect(PixelRect {
+            xy: UVec2::new(x_offset, y_offset),
+            wh: c.sub_size,
+            extent: self.dimensions,
+        })
+    }
+}
+
 #[derive(Copy, Clone)]
 pub struct PixelRect {
-    pub xy: Vec2,
-    pub wh: Vec2,
-    pub screen: Vec2,
+    pub xy: UVec2,
+    pub wh: UVec2,
+    pub extent: UVec2,
 }
 
 pub struct ComponentTransform {
@@ -296,21 +317,42 @@ impl Default for ComponentTransform {
 }
 
 impl ComponentTransform {
-    pub fn pixel_rect_to_screen_transform(pixel_rect: PixelRect) -> ComponentTransform {
+    pub fn to_mat4(&self) -> Mat4 {
+        Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.location)
+    }
+
+    pub fn tex_transform_from_pixel_rect(pixel_rect: PixelRect) -> ComponentTransform {
+        let xy = Vec2::new(pixel_rect.xy.x as f32, pixel_rect.xy.y as f32);
+        let wh = Vec2::new(pixel_rect.wh.x as f32, pixel_rect.wh.y as f32);
+        let extent = Vec2::new(pixel_rect.extent.x as f32, pixel_rect.extent.y as f32);
+
+        let location = Vec3::new(xy.x / extent.x, xy.y / extent.y, 0.0);
+        let rotation = Quat::IDENTITY;
+        let scale = Vec3::new(wh.x / extent.x, wh.y / extent.y, 1.0);
+
+        ComponentTransform {
+            pixel_rect: Some(pixel_rect),
+            location,
+            rotation,
+            scale,
+        }
+    }
+
+    pub fn unit_square_transform_from_pixel_rect(pixel_rect: PixelRect) -> ComponentTransform {
         // given window pixels x, y (top left) of w, h (width, height) produce a transform
         // that positions the UNIT_SQUARE geometry as desired in render space...
 
-        let xy = pixel_rect.xy;
-        let wh = pixel_rect.wh;
-        let screen = pixel_rect.screen;
+        let xy = Vec2::new(pixel_rect.xy.x as f32, pixel_rect.xy.y as f32);
+        let wh = Vec2::new(pixel_rect.wh.x as f32, pixel_rect.wh.y as f32);
+        let extent = Vec2::new(pixel_rect.extent.x as f32, pixel_rect.extent.y as f32);
 
         let location = Vec3::new(
-            (xy.x / screen.x) * 2.0 - 1.0,
-            1.0 - (xy.y / screen.y) * 2.0,
+            (xy.x / extent.x) * 2.0 - 1.0,
+            1.0 - (xy.y / extent.y) * 2.0,
             0.0,
         );
         let rotation = Quat::IDENTITY;
-        let scale = Vec3::new((wh.x / screen.x) * 2.0, (wh.y / screen.y) * 2.0, 1.0);
+        let scale = Vec3::new((wh.x / extent.x) * 2.0, (wh.y / extent.y) * 2.0, 1.0);
 
         ComponentTransform {
             pixel_rect: Some(pixel_rect),

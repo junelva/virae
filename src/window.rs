@@ -1,4 +1,4 @@
-use glam::Vec2;
+use glam::UVec2;
 use wgpu::{
     CommandEncoderDescriptor, CompositeAlphaMode, Device, DeviceDescriptor, Features, IndexFormat,
     Instance, InstanceDescriptor, Limits, LoadOp, Operations, PresentMode, Queue,
@@ -171,7 +171,7 @@ impl Context<'_> {
         for group in self.geos.instance_groups.iter_mut() {
             group.recalc_screen_instances(
                 self.queue.clone(),
-                Vec2::new(config.width as f32, config.height as f32),
+                UVec2::new(config.width, config.height),
             )
         }
     }
