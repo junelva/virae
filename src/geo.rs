@@ -48,13 +48,21 @@ impl GeoInstances {
         cluster_index: usize,
         sub_index: usize,
         color: Vec4,
-    ) {
+    ) -> usize {
+        let index = self.instance_buffer_manager.data.len();
         self.instance_buffer_manager.add_instance(
             queue,
             transform,
             self.sheet.cluster_sub_transform(cluster_index, sub_index),
             color,
         );
+        index
+    }
+
+    pub fn mark_all_for_update(&mut self) {
+        for instance in self.instance_buffer_manager.data.iter_mut() {
+            instance.needs_update = true;
+        }
     }
 
     pub fn recalc_screen_instances(&mut self, queue: Arc<Mutex<Queue>>, screen: UVec2) {
@@ -244,7 +252,7 @@ impl GeoManager {
         height: u32,
         sheet_info: TextureSheetDefinition,
         shader_path: &str,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<usize, Box<dyn Error>> {
         // prepare texture sheet data
         let sheet = load_texture(self.device.clone(), self.queue.clone(), sheet_info)?;
 
@@ -399,6 +407,7 @@ impl GeoManager {
         // drop device here because it's used to make the instance buffer below.
         drop(device);
 
+        let index = self.instance_groups.len();
         self.instance_groups.push(GeoInstances {
             render_pipeline_record,
             bind_group,
@@ -410,6 +419,6 @@ impl GeoManager {
             instance_buffer_manager: InstanceBufferManager::new(max_instances, self.device.clone()),
         });
 
-        Ok(())
+        Ok(index)
     }
 }

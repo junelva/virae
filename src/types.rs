@@ -1,4 +1,4 @@
-use glam::{Quat, UVec2};
+use glam::{IVec2, Quat, UVec2};
 use std::{
     mem::size_of,
     sync::{Arc, Mutex},
@@ -136,9 +136,17 @@ pub struct GeoUniformMatrix {
 }
 
 pub struct Instance {
+    pub needs_update: bool,
     pub transform: ComponentTransform,
     pub tex_transform: ComponentTransform,
     pub color: Vec4,
+}
+
+impl Instance {
+    pub fn translate(&mut self, by: Vec3) {
+        self.transform.location += by;
+        self.needs_update = true;
+    }
 }
 
 #[derive(Copy, Clone, Pod, Zeroable, ByteEq, ByteHash)]
@@ -200,31 +208,36 @@ impl InstanceBufferManager {
             transform,
             tex_transform,
             color,
+            needs_update: false,
         });
     }
 
     pub fn recalc_screen_instances(&mut self, queue: Arc<Mutex<Queue>>, screen: UVec2) {
-        let queue = queue.lock().unwrap();
-        for (i, instance) in self.data.iter_mut().enumerate() {
-            if instance.transform.pixel_rect.is_some() {
-                let pr = instance
-                    .transform
-                    .pixel_rect
-                    .expect("pixel rect unwrap error");
-                instance.transform =
-                    ComponentTransform::unit_square_transform_from_pixel_rect(PixelRect {
-                        xy: pr.xy,
-                        wh: pr.wh,
-                        extent: screen,
-                    });
+        for (instance_index, instance) in self.data.iter_mut().enumerate() {
+            if instance.needs_update && instance.transform.pixel_rect.is_some() {
+                instance.needs_update = false;
+                let queue = queue.lock().unwrap();
+                let pr = instance.transform.pixel_rect.unwrap();
                 let new_data = InstanceData {
-                    transform: instance.transform.to_mat4(),
+                    transform: ComponentTransform::unit_square_transform_from_pixel_rect(
+                        PixelRect {
+                            xy: IVec2::new(
+                                ((instance.transform.location.x * 0.5 + 0.5) * screen.x as f32)
+                                    as i32,
+                                ((instance.transform.location.y * 0.5 + 0.5) * screen.y as f32)
+                                    as i32,
+                            ),
+                            wh: pr.wh,
+                            extent: screen,
+                        },
+                    )
+                    .to_mat4(),
                     tex_transform: instance.tex_transform.to_mat4(),
                     color: instance.color,
                 };
                 queue.write_buffer(
                     &self.buffer,
-                    (i * size_of::<InstanceData>()) as BufferAddress,
+                    (instance_index * size_of::<InstanceData>()) as BufferAddress,
                     bytemuck::cast_slice(&[new_data]),
                 );
             }
@@ -284,7 +297,7 @@ impl TextureSheet {
         let y_offset = c.offset.y + row_index * (c.sub_size.y + c.spacing.y);
 
         ComponentTransform::tex_transform_from_pixel_rect(PixelRect {
-            xy: UVec2::new(x_offset, y_offset),
+            xy: IVec2::new(x_offset as i32, y_offset as i32),
             wh: c.sub_size,
             extent: self.dimensions,
         })
@@ -293,7 +306,7 @@ impl TextureSheet {
 
 #[derive(Copy, Clone)]
 pub struct PixelRect {
-    pub xy: UVec2,
+    pub xy: IVec2,
     pub wh: UVec2,
     pub extent: UVec2,
 }

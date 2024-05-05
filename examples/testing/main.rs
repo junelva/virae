@@ -1,11 +1,12 @@
 use std::error::Error;
 
-use glam::UVec2;
+use glam::{IVec2, UVec2};
 use virae::types::{
     ComponentTransform, PixelRect, TextureSheetClusterDefinition, TextureSheetDefinition,
 };
 use virae::window::Context;
 use virae::{Event, HalRect, Vec4, WindowEvent};
+use winit::event_loop::ControlFlow;
 
 fn main() -> Result<(), Box<dyn Error>> {
     pollster::block_on(run())?;
@@ -14,7 +15,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 async fn run() -> Result<(), Box<dyn Error>> {
     let (width, height) = (800, 600);
-    let (event_loop, window, mut context) = Context::new("testing", width, height).await?;
+    let (event_loop, window, mut context) =
+        Context::new("testing", width, height, ControlFlow::Wait).await?;
 
     {
         let shader_path = "examples/testing/shader.wgsl";
@@ -56,7 +58,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
             context.geos.instance_groups[0].add_new(
                 context.queue.clone(),
                 ComponentTransform::unit_square_transform_from_pixel_rect(PixelRect {
-                    xy: UVec2::new(x, y),
+                    xy: IVec2::new(x as i32, y as i32),
                     wh: UVec2::new(w, h),
                     extent: UVec2::new(config.width, config.height),
                 }),

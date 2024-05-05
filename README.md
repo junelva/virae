@@ -8,18 +8,23 @@ This is a personal game engine. The architecture is not designed for expansive, 
 
 #### development log and planning.
 ```
-[x] i am breaking and reshaping code.
+examples status: still unfinished.
 
 what follows in this zone is random notetaking,
 often out of order and simply used as scratch.
+
+stage: creating an example game. todo:
+  - [ ] time based motion
+  - [ ] proper screen scaling
+  - [ ] comprehensive input
+  - [ ] sprite frame animation
 
 - [x] increase usage of `?` operator & expect
 - [x] implement texture/sprite rendering
 > [x] blending modes for transparent textures
 > [x] sprite sheets to instance uv transforms
-- [ ] integrate an ecs - flax? survey.
-- [x] api-ify the engine-y usage design.
-- [ ] create example game using said api.
+- [~] api-ify the engine-y usage design.
+  - (~ means this task is ongoing as needed)
 
 sunday's evening:
 - [x] actually position rects.

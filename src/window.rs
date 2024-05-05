@@ -67,11 +67,11 @@ impl Context<'_> {
         title: &str,
         width: u32,
         height: u32,
+        control_flow: ControlFlow,
     ) -> Result<(EventLoop<()>, Arc<winit::window::Window>, Self), Box<dyn Error>> {
         // event loop, window
         let event_loop = EventLoop::new().unwrap();
-        event_loop.set_control_flow(ControlFlow::Wait);
-        // event_loop.set_control_flow(ControlFlow::Poll);
+        event_loop.set_control_flow(control_flow);
         let window = Arc::new(
             WindowBuilder::new()
                 .with_inner_size(LogicalSize::new(width as f64, height as f64))
@@ -156,6 +156,13 @@ impl Context<'_> {
 
     pub fn update(&mut self) -> Result<(), Box<dyn Error>> {
         self.check_watched_files()?;
+        let config = self.config.lock().unwrap();
+        for group in self.geos.instance_groups.iter_mut() {
+            group.recalc_screen_instances(
+                self.queue.clone(),
+                UVec2::new(config.width, config.height),
+            )
+        }
         Ok(())
     }
 
@@ -169,10 +176,7 @@ impl Context<'_> {
         self.geos
             .update_view(self.queue.clone(), config.width, config.height);
         for group in self.geos.instance_groups.iter_mut() {
-            group.recalc_screen_instances(
-                self.queue.clone(),
-                UVec2::new(config.width, config.height),
-            )
+            group.mark_all_for_update();
         }
     }
 
