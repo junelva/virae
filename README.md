@@ -76,8 +76,7 @@ i'll worry about that when
 it becomes a problem.
 
 such is life. [x]
-got distracted, added shader hotloading.
-meow. [x] mrr. [x]
+[x] got distracted, added shader hotloading.
 
 thursday:
 custom geometry was locked to view space.

@@ -47,8 +47,8 @@ async fn run() -> Result<(), Box<dyn Error>> {
         let player_index = context.geos.instance_groups[0].add_new(
             context.queue.clone(),
             ComponentTransform::unit_square_transform_from_pixel_rect(PixelRect {
-                xy: IVec2::new((config.width / 2) as i32, (config.height / 2) as i32),
-                wh: UVec2::new(32, 32),
+                xy: IVec2::new(0, 0),
+                wh: UVec2::new(64, 64),
                 extent: UVec2::new(config.width, config.height),
             }),
             0,
